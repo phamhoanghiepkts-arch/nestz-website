@@ -1,34 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 
-const client = new Anthropic();
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-export async function POST(req: NextRequest) {
-  try {
-    const { imageData, mediaType } = await req.json();
-
-    if (!imageData) {
-      return NextResponse.json({ error: "Thiếu dữ liệu ảnh" }, { status: 400 });
-    }
-
-    const response = await client.messages.create({
-      model: "claude-opus-4-7",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: mediaType || "image/jpeg",
-                data: imageData,
-              },
-            },
-            {
-              type: "text",
-              text: `Phân tích bức ảnh này và nhận dạng tất cả các món ăn/thực phẩm có trong ảnh.
+const PROMPT = `Phân tích bức ảnh này và nhận dạng tất cả các món ăn/thực phẩm có trong ảnh.
 
 Hãy trả lời theo định dạng JSON sau (không thêm gì khác ngoài JSON):
 {
@@ -52,19 +27,39 @@ Hãy trả lời theo định dạng JSON sau (không thêm gì khác ngoài JSO
 }
 
 Nếu không nhận ra được thức ăn trong ảnh, trả về:
-{"error": "Không nhận dạng được thức ăn trong ảnh"}`,
+{"error": "Không nhận dạng được thức ăn trong ảnh"}`;
+
+export async function POST(req: NextRequest) {
+  try {
+    const { imageData, mediaType } = await req.json();
+
+    if (!imageData) {
+      return NextResponse.json({ error: "Thiếu dữ liệu ảnh" }, { status: 400 });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json({ error: "Chưa cấu hình GEMINI_API_KEY" }, { status: 500 });
+    }
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                mimeType: mediaType || "image/jpeg",
+                data: imageData,
+              },
             },
+            { text: PROMPT },
           ],
         },
       ],
     });
 
-    const content = response.content[0];
-    if (content.type !== "text") {
-      return NextResponse.json({ error: "Lỗi phản hồi từ AI" }, { status: 500 });
-    }
-
-    const text = content.text.trim();
+    const text = response.text?.trim() ?? "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       return NextResponse.json({ error: "Không thể phân tích kết quả" }, { status: 500 });
